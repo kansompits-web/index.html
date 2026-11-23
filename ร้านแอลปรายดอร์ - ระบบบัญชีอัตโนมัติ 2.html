@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>ร้านแอลปรายดอร์ - ระบบบัญชีอัตโนมัติ</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/htm@3.1.1/dist/htm.umd.js"></script>
+<style>
+:root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{font-family:'Sarabun',system-ui,sans-serif;background:#f1f5f9;color:#0f172a;margin:0}
+.tn{font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const {useState,useMemo}=React;
+const h=htm.bind(React.createElement);
+const r2=n=>Math.round((n+Number.EPSILON)*100)/100;
+const f=n=>r2(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const dt=d=>new Date(d+'T00:00:00').toLocaleDateString('th-TH',{day:'numeric',month:'short',year:'numeric'});
+
+const ACC={1100:'เงินสด',1110:'เงินฝากธนาคาร',1200:'ลูกหนี้การค้า',1300:'สินค้าคงเหลือ',2100:'เจ้าหนี้การค้า',2300:'ค่าใช้จ่ายค้างจ่าย',3100:'ทุน - เจ้าของ',4100:'ขายสินค้า',4200:'รับคืนสินค้า (ขาย)',5100:'ซื้อสินค้า',5200:'ส่งคืนสินค้า (ซื้อ)',5300:'ค่าเช่า',5400:'เงินเดือนและค่าแรง',5500:'ค่าไฟฟ้าและน้ำประปา',5600:'ค่าใช้จ่ายเบ็ดเตล็ด'};
+const EXP=[5300,5400,5500,5600];
+const CUST={C01:'ร้านของขวัญมินนี่',C02:'ร้านกิฟช็อป',C03:'ร้านของขวัญพรีเมียม'};
+const VEND={V01:'บริษัทเจริญกิจ',V02:'บริษัทดรีมดอลล์',V03:'บริษัทซันนี่ดอล์'};
+const PN={...CUST,...VEND};
+const BOOKS={PJ:'สมุดรายวันซื้อ',SJ:'สมุดรายวันขาย',RJ:'สมุดรายวันรับเงิน',CJ:'สมุดรายวันจ่ายเงิน',GJ:'สมุดรายวันทั่วไป'};
+const TYPES={
+PJ:[{k:'buy',t:'ซื้อสินค้าเชื่อ',v:1,p:'V'},{k:'ret',t:'ส่งคืนสินค้า (ซื้อ)',v:1,p:'V'}],
+SJ:[{k:'sell',t:'ขายสินค้าเชื่อ',v:1,p:'C'},{k:'ret',t:'รับคืนสินค้า (ขาย)',v:1,p:'C'}],
+RJ:[{k:'ar',t:'รับชำระหนี้จากลูกหนี้',p:'C',c:1},{k:'cash',t:'ขายสินค้าเป็นเงินสด',v:1,c:1}],
+CJ:[{k:'ap',t:'จ่ายชำระหนี้เจ้าหนี้',p:'V',c:1},{k:'buy',t:'ซื้อสินค้าเป็นเงินสด',v:1,c:1},{k:'exp',t:'จ่ายค่าใช้จ่าย',v:1,c:1,x:1}]};
+
+const L=(a,dr,cr,p)=>({a,dr,cr,p});
+const build=(b,k,n,p,c,x)=>{
+  const vat=0,tot=n;
+  const m={
+    PJ:{buy:[L(5100,n,0),L(1400,vat,0),L(2100,0,tot,p)],ret:[L(2100,tot,0,p),L(5200,0,n),L(1400,0,vat)]},
+    SJ:{sell:[L(1200,tot,0,p),L(4100,0,n),L(2200,0,vat)],ret:[L(4200,n,0),L(2200,vat,0),L(1200,0,tot,p)]},
+    RJ:{ar:[L(c,n,0),L(1200,0,n,p)],cash:[L(c,tot,0),L(4100,0,n),L(2200,0,vat)]},
+    CJ:{ap:[L(2100,n,0,p),L(c,0,n)],buy:[L(5100,n,0),L(1400,vat,0),L(c,0,tot)],exp:[L(x,n,0),L(1400,vat,0),L(c,0,tot)]}};
+  const t=TYPES[b].find(t=>t.k===k);
+  return {lines:m[b][k].filter(l=>l.dr||l.cr),net:n,vat:t.v?vat:0,tot:t.v?tot:n,sg:(k==='ret'&&(b==='PJ'||b==='SJ'))?-1:1};
+};
+const mk=(b,k,date,desc,n,p,c,x)=>({book:b,date,desc,type:TYPES[b].find(t=>t.k===k).t,...build(b,k,n,p,c,x)});
+const gj=(date,desc,type,lines)=>({book:'GJ',date,desc,type,lines,net:lines.reduce((s,l)=>s+l.dr,0),vat:0,tot:lines.reduce((s,l)=>s+l.dr,0),sg:1});
+const addTo=(prev,list)=>{const a=[...prev];list.forEach(e=>{const c=a.filter(x=>x.book===e.book).length+1;a.push({...e,doc:e.doc||e.book+'-'+String(c).padStart(3,'0')});});return a;};
+const SAMPLES=()=>[
+  gj('2026-11-01','เจ้าของนำเงินสดและเงินฝากธนาคารมาลงทุนเริ่มต้น','ลงทุนเริ่มแรก',[L(1100,200000,0),L(1110,300000,0),L(3100,0,500000)]),
+  mk('PJ','buy','2026-11-02','ซื้อสินค้าเชื่อ ใบแจ้งหนี้ INV-A101',100000,'V01'),
+  mk('PJ','buy','2026-11-03','ซื้อสินค้าเชื่อ ใบแจ้งหนี้ INV-B220',50000,'V02'),
+  mk('SJ','sell','2026-11-05','ขายสินค้าเชื่อให้ร้านของขวัญมินนี่',80000,'C01'),
+  mk('SJ','sell','2026-11-06','ขายสินค้าเชื่อให้ร้านกิฟช็อป',60000,'C02'),
+  mk('PJ','ret','2026-11-08','ส่งคืนสินค้าชำรุดให้บริษัทเจริญกิจ (ใบลดหนี้)',5000,'V01'),
+  mk('SJ','ret','2026-11-09','ร้านของขวัญมินนี่ส่งคืนสินค้า (ใบลดหนี้)',4000,'C01'),
+  mk('RJ','ar','2026-11-12','รับชำระหนี้จากร้านของขวัญมินนี่ โอนเข้าธนาคาร',50000,'C01',1110),
+  mk('RJ','cash','2026-11-13','ขายสินค้าเป็นเงินสดหน้าร้าน',20000,null,1100),
+  mk('CJ','ap','2026-11-15','จ่ายชำระหนี้บริษัทเจริญกิจ โอนผ่านธนาคาร',40000,'V01',1110),
+  mk('CJ','buy','2026-11-16','ซื้อสินค้าเป็นเงินสด',10000,null,1100),
+  mk('CJ','exp','2026-11-17','จ่ายค่าเช่าร้านประจำเดือน',15000,null,1100,5300),
+  mk('SJ','sell','2026-11-20','ขายสินค้าเชื่อให้ร้านของขวัญพรีเมียม',30000,'C03'),
+  gj('2026-11-30','ปรับปรุงค่าไฟฟ้าค้างจ่ายสิ้นเดือน','รายการปรับปรุง',[L(5500,3500,0),L(2300,0,3500)]),
+  gj('2026-11-30','ปรับปรุงเงินเดือนพนักงานค้างจ่ายสิ้นเดือน','รายการปรับปรุง',[L(5400,12000,0),L(2300,0,12000)])
+];
+
+function ledger(entries){
+  const gl={},ar={},ap={};
+  const es=entries.map((e,i)=>[e,i]).sort((a,b)=>a[0].date<b[0].date?-1:a[0].date>b[0].date?1:a[1]-b[1]).map(x=>x[0]);
+  const push=(o,key,row)=>{const a=o[key]=o[key]||[];const pv=a.length?a[a.length-1].bal:0;a.push({...row,bal:r2(pv+row.dr-row.cr)});};
+  es.forEach(e=>e.lines.forEach(l=>{
+    const row={date:e.date,doc:e.doc,desc:e.desc,dr:l.dr,cr:l.cr};
+    push(gl,l.a,row);
+    if(l.p)push(l.a==1200?ar:ap,l.p,row);
+  }));
+  return {gl,ar,ap};
+}
+
+const inp="w-full border border-slate-300 rounded-lg px-3 py-2 bg-white text-base focus:outline-none focus:ring-2 focus:ring-teal-500";
+const btnP="px-5 py-2.5 rounded-lg font-semibold bg-teal-700 text-white hover:bg-teal-800 disabled:opacity-40";
+const Card=({children,cls})=>h`<div className=${'bg-white rounded-xl border border-slate-200 shadow-sm '+(cls||'')}>${children}</div>`;
+const Fld=({label,children})=>h`<label className="block"><span className="block text-sm font-medium text-slate-600 mb-1">${label}</span>${children}</label>`;
+const Bal=({v})=>h`<span className=${v<0?'text-rose-700':'text-slate-900'}>${f(Math.abs(v))} <small className="text-slate-500">${v>=0?'เดบิต':'เครดิต'}</small></span>`;
+const Empty=()=>h`<${Card} cls="p-8 text-center text-slate-500">ยังไม่มีรายการ — กลับไปที่หน้าหลักแล้วกดปุ่มโหลดตัวอย่าง หรือบันทึกรายการในสมุดรายวัน<//>`;
+
+const LinesTable=({lines})=>h`<div className="overflow-x-auto"><table className="w-full text-sm">
+  <thead><tr className="text-slate-500 text-xs"><th className="px-4 py-1 text-left font-medium">บัญชี</th><th className="px-4 py-1 text-right font-medium w-32">เดบิต</th><th className="px-4 py-1 text-right font-medium w-32">เครดิต</th></tr></thead>
+  <tbody>${lines.map((l,i)=>h`<tr key=${i} className="border-t border-slate-100">
+    <td className=${'px-4 py-1.5 '+(l.cr&&!l.dr?'pl-10':'')}>${l.a} ${ACC[l.a]}${l.p?' ('+PN[l.p]+')':''}</td>
+    <td className="px-4 py-1.5 text-right tn whitespace-nowrap">${l.dr?f(l.dr):''}</td>
+    <td className="px-4 py-1.5 text-right tn whitespace-nowrap">${l.cr?f(l.cr):''}</td></tr>`)}</tbody></table></div>`;
+
+const EntryCard=({e})=>h`<${Card} cls="mb-3 overflow-hidden">
+  <div className="px-4 py-2 bg-slate-50 flex flex-wrap gap-x-4 gap-y-0.5 text-sm"><b>${e.doc}</b><span>${dt(e.date)}</span><span className="text-teal-700 font-medium">${e.type}</span><span className="text-slate-600">${e.desc}</span></div>
+  <${LinesTable} lines=${e.lines}/>
+  ${e.vat>0&&h`<div className="px-4 py-2 text-xs bg-amber-50 border-t border-amber-100 text-amber-900 tn">มูลค่าก่อน VAT ${f(e.net)} บาท | VAT 7% ${f(e.vat)} บาท | รวมทั้งสิ้น ${f(e.tot)} บาท</div>`}
+<//>`;
+
+const EntryList=({book,entries})=>{
+  const list=entries.filter(e=>e.book===book);
+  const s=list.reduce((a,e)=>({n:a.n+e.sg*e.net,v:a.v+e.sg*e.vat,t:a.t+e.sg*e.tot}),{n:0,v:0,t:0});
+  return h`<div>
+    <h3 className="font-bold text-lg mt-6 mb-2">รายการที่บันทึกใน${BOOKS[book]} (${list.length} รายการ)</h3>
+    ${list.length===0?h`<${Empty}/>`:h`<div>
+      ${[...list].reverse().map(e=>h`<${EntryCard} key=${e.doc} e=${e}/>`)}
+      ${s.v!==0&&h`<${Card} cls="p-4 bg-teal-50 text-sm tn"><b>สรุปยอดสุทธิ (หักรายการส่งคืน): </b>ก่อน VAT ${f(s.n)} | VAT 7% ${f(s.v)} | รวม ${f(s.t)} บาท<//>`}
+    </div>`}
+  </div>`;
+};
+
+function Journal({book,entries,onAdd}){
+  const T=TYPES[book];
+  const [k,setK]=useState(T[0].k),[date,setDate]=useState('2026-11-23'),[desc,setDesc]=useState(''),[net,setNet]=useState('');
+  const [party,setParty]=useState(''),[cash,setCash]=useState(1100),[x,setX]=useState(5300),[err,setErr]=useState('');
+  const t=T.find(i=>i.k===k),n=r2(parseFloat(net)||0);
+  const pv=build(book,k,n,party||'-',cash,x);
+  const P=t.p==='C'?CUST:VEND;
+  const save=()=>{
+    if(n<=0)return setErr('กรุณากรอกจำนวนเงินให้มากกว่า 0');
+    if(t.p&&!party)return setErr('กรุณาเลือก'+(t.p==='C'?'ลูกหนี้':'เจ้าหนี้'));
+    setErr('');onAdd([{book,date,desc:desc||t.t,type:t.t,...build(book,k,n,party,cash,x)}]);setNet('');setDesc('');
+  };
+  return h`<div>
+    <${Card} cls="p-4 md:p-5">
+      <h3 className="font-bold text-lg mb-3">บันทึกรายการใน${BOOKS[book]}</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <${Fld} label="ประเภทรายการ"><select className=${inp} value=${k} onChange=${e=>{setK(e.target.value);setParty('');}}>${T.map(i=>h`<option key=${i.k} value=${i.k}>${i.t}</option>`)}</select><//>
+        <${Fld} label="วันที่"><input type="date" className=${inp} value=${date} onChange=${e=>setDate(e.target.value)}/><//>
+        ${t.p&&h`<${Fld} label=${t.p==='C'?'ลูกหนี้ (ลูกค้า)':'เจ้าหนี้ (ผู้ขาย)'}><select className=${inp} value=${party} onChange=${e=>setParty(e.target.value)}><option value="">-- เลือก --</option>${Object.entries(P).map(([c,nm])=>h`<option key=${c} value=${c}>${nm}</option>`)}</select><//>`}
+        ${t.c&&h`<${Fld} label=${book==='RJ'?'รับเงินเข้าบัญชี':'จ่ายเงินจากบัญชี'}><select className=${inp} value=${cash} onChange=${e=>setCash(+e.target.value)}><option value="1100">1100 เงินสด</option><option value="1110">1110 เงินฝากธนาคาร</option></select><//>`}
+        ${t.x&&h`<${Fld} label="หมวดค่าใช้จ่าย"><select className=${inp} value=${x} onChange=${e=>setX(+e.target.value)}>${EXP.map(a=>h`<option key=${a} value=${a}>${a} ${ACC[a]}</option>`)}</select><//>`}
+        <${Fld} label="จำนวนเงิน (บาท)"><input type="number" min="0" step="0.01" className=${inp} value=${net} placeholder="0.00" onChange=${e=>setNet(e.target.value)}/><//>
+        <${Fld} label="คำอธิบายรายการ"><input className=${inp} value=${desc} placeholder="เช่น ใบกำกับภาษีเลขที่..." onChange=${e=>setDesc(e.target.value)}/><//>
+      </div>
+      ${false?h`<div className="mt-3 grid grid-cols-3 gap-2 text-center text-sm">
+        <div className="bg-slate-50 rounded-lg p-2">ก่อน VAT<div className="font-bold tn">${f(n)}</div></div>
+        <div className="bg-amber-50 rounded-lg p-2">VAT 7%<div className="font-bold tn">${f(pv.vat)}</div></div>
+        <div className="bg-teal-50 rounded-lg p-2">รวมสุทธิ<div className="font-bold tn">${f(pv.tot)}</div></div></div>`:null}
+      ${n>0&&h`<div className="mt-3 border border-dashed border-slate-300 rounded-lg"><div className="px-4 pt-2 text-xs text-slate-500">ตัวอย่างการบันทึกบัญชี (จะผ่านรายการอัตโนมัติ)</div><${LinesTable} lines=${pv.lines}/></div>`}
+      ${err&&h`<div className="mt-3 text-rose-700 text-sm font-medium">${err}</div>`}
+      <div className="mt-4"><button className=${btnP} onClick=${save}>บันทึกรายการและผ่านรายการอัตโนมัติ</button></div>
+    <//>
+    <${EntryList} book=${book} entries=${entries}/>
+  </div>`;
+}
+
+function GJournal({entries,onAdd}){
+  const blank=()=>({a:'',p:'',dr:'',cr:''});
+  const [rows,setRows]=useState([blank(),blank()]),[date,setDate]=useState('2026-11-30'),[desc,setDesc]=useState(''),[err,setErr]=useState('');
+  const up=(i,k,v)=>setRows(rs=>rs.map((r,j)=>j===i?{...r,[k]:v,...(k==='a'?{p:''}:{})}:r));
+  const td=r2(rows.reduce((s,r)=>s+(parseFloat(r.dr)||0),0)),tc=r2(rows.reduce((s,r)=>s+(parseFloat(r.cr)||0),0));
+  const save=()=>{
+    const used=rows.filter(r=>r.a||r.dr||r.cr);
+    if(used.length<2)return setErr('ต้องมีอย่างน้อย 2 บรรทัด');
+    for(const r of used){
+      if(!r.a)return setErr('กรุณาเลือกบัญชีให้ครบทุกบรรทัด');
+      if((r.a==='1200'||r.a==='2100')&&!r.p)return setErr('บัญชีลูกหนี้/เจ้าหนี้ต้องระบุรายตัว');
+      if((parseFloat(r.dr)||0)>0&&(parseFloat(r.cr)||0)>0)return setErr('แต่ละบรรทัดกรอกได้ด้านเดียว');
+    }
+    if(td<=0||td!==tc)return setErr('ยอดเดบิตต้องเท่ากับยอดเครดิตและมากกว่า 0');
+    setErr('');
+    const lines=used.map(r=>L(+r.a,r2(parseFloat(r.dr)||0),r2(parseFloat(r.cr)||0),r.p||undefined));
+    onAdd([{book:'GJ',date,desc:desc||'รายการทั่วไป',type:'รายการทั่วไป',lines,net:td,vat:0,tot:td,sg:1}]);
+    setRows([blank(),blank()]);setDesc('');
+  };
+  return h`<div>
+    <${Card} cls="p-4 md:p-5">
+      <h3 className="font-bold text-lg">บันทึกรายการใน${BOOKS.GJ}</h3>
+      <p className="text-sm text-slate-500 mb-3">สำหรับรายการที่บันทึกในสมุดรายวันเฉพาะไม่ได้ เช่น เงินลงทุน รายการปรับปรุง ค่าใช้จ่ายค้างจ่าย</p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+        <${Fld} label="วันที่"><input type="date" className=${inp} value=${date} onChange=${e=>setDate(e.target.value)}/><//>
+        <${Fld} label="คำอธิบายรายการ"><input className=${inp} value=${desc} onChange=${e=>setDesc(e.target.value)}/><//>
+      </div>
+      ${rows.map((r,i)=>h`<div key=${i} className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2 p-2 bg-slate-50 rounded-lg">
+        <select className=${inp+' col-span-2 md:col-span-1'} value=${r.a} onChange=${e=>up(i,'a',e.target.value)}><option value="">-- เลือกบัญชี --</option>${Object.entries(ACC).map(([c,nm])=>h`<option key=${c} value=${c}>${c} ${nm}</option>`)}</select>
+        ${(r.a==='1200'||r.a==='2100')?h`<select className=${inp+' col-span-2 md:col-span-1'} value=${r.p} onChange=${e=>up(i,'p',e.target.value)}><option value="">-- เลือกบุคคล --</option>${Object.entries(r.a==='1200'?CUST:VEND).map(([c,nm])=>h`<option key=${c} value=${c}>${nm}</option>`)}</select>`:h`<div className="hidden md:block"></div>`}
+        <input type="number" min="0" step="0.01" className=${inp} placeholder="เดบิต" value=${r.dr} onChange=${e=>up(i,'dr',e.target.value)}/>
+        <input type="number" min="0" step="0.01" className=${inp} placeholder="เครดิต" value=${r.cr} onChange=${e=>up(i,'cr',e.target.value)}/>
+      </div>`)}
+      <div className="flex flex-wrap items-center gap-3 mt-2">
+        <button className="px-4 py-2 rounded-lg border border-slate-300 bg-white" onClick=${()=>setRows([...rows,blank()])}>+ เพิ่มบรรทัด</button>
+        <span className=${'text-sm tn font-medium '+(td===tc&&td>0?'text-emerald-700':'text-rose-700')}>เดบิต ${f(td)} | เครดิต ${f(tc)}</span>
+      </div>
+      ${err&&h`<div className="mt-3 text-rose-700 text-sm font-medium">${err}</div>`}
+      <div className="mt-4"><button className=${btnP} onClick=${save}>บันทึกรายการและผ่านรายการอัตโนมัติ</button></div>
+    <//>
+    <${EntryList} book="GJ" entries=${entries}/>
+  </div>`;
+}
+
+const LedgerCard=({title,rows,end})=>h`<${Card} cls="mb-4 overflow-hidden">
+  <div className="px-4 py-2 bg-slate-800 text-white flex justify-between items-center"><b>${title}</b><span className="text-sm">คงเหลือ <b className="tn">${f(Math.abs(end))}</b> ${end>=0?'เดบิต':'เครดิต'}</span></div>
+  <div className="overflow-x-auto"><table className="w-full text-sm min-w-[620px]">
+    <thead className="bg-slate-50 text-slate-600"><tr><th className="px-3 py-1.5 text-left">วันที่</th><th className="px-3 py-1.5 text-left">เลขที่</th><th className="px-3 py-1.5 text-left">รายการ</th><th className="px-3 py-1.5 text-right">เดบิต</th><th className="px-3 py-1.5 text-right">เครดิต</th><th className="px-3 py-1.5 text-right">ยอดคงเหลือ</th></tr></thead>
+    <tbody>${rows.map((r,i)=>h`<tr key=${i} className="border-t border-slate-100"><td className="px-3 py-1.5 whitespace-nowrap">${dt(r.date)}</td><td className="px-3 py-1.5">${r.doc}</td><td className="px-3 py-1.5">${r.desc}</td><td className="px-3 py-1.5 text-right tn">${r.dr?f(r.dr):''}</td><td className="px-3 py-1.5 text-right tn">${r.cr?f(r.cr):''}</td><td className="px-3 py-1.5 text-right tn"><${Bal} v=${r.bal}/></td></tr>`)}</tbody></table></div>
+<//>`;
+
+function GL({entries}){
+  const {gl}=useMemo(()=>ledger(entries),[entries]);
+  const keys=Object.keys(gl).sort();
+  return h`<div>${keys.length===0?h`<${Empty}/>`:keys.map(a=>h`<${LedgerCard} key=${a} title=${a+' '+ACC[a]} rows=${gl[a]} end=${gl[a][gl[a].length-1].bal}/>`)}</div>`;
+}
+
+function Sub({entries,kind}){
+  const L2=useMemo(()=>ledger(entries),[entries]);
+  const data=kind==='ar'?L2.ar:L2.ar&&L2.ap,P=kind==='ar'?CUST:VEND,ctl=kind==='ar'?1200:2100;
+  const d=kind==='ar'?L2.ar:L2.ap;
+  const keys=Object.keys(d).sort();
+  const tot=r2(keys.reduce((s,p)=>s+d[p][d[p].length-1].bal,0));
+  const g=L2.gl[ctl]?L2.gl[ctl][L2.gl[ctl].length-1].bal:0;
+  return h`<div>${keys.length===0?h`<${Empty}/>`:h`<div>
+    ${keys.map(p=>h`<${LedgerCard} key=${p} title=${p+' '+P[p]} rows=${d[p]} end=${d[p][d[p].length-1].bal}/>`)}
+    <${Card} cls=${'p-4 text-sm '+(tot===g?'bg-emerald-50':'bg-rose-50')}>
+      <div className="font-bold mb-1">สรุปยอดคงเหลือ${kind==='ar'?'ลูกหนี้การค้า':'เจ้าหนี้การค้า'}รายตัว</div>
+      ${keys.map(p=>h`<div key=${p} className="flex justify-between"><span>${P[p]}</span><b className="tn"><${Bal} v=${d[p][d[p].length-1].bal}/></b></div>`)}
+      <div className="flex justify-between border-t mt-1 pt-1 font-bold"><span>รวมบัญชีย่อย</span><span className="tn">${f(Math.abs(tot))}</span></div>
+      <div className="flex justify-between"><span>บัญชีคุม ${ctl} ในแยกประเภททั่วไป</span><span className="tn">${f(Math.abs(g))}</span></div>
+      <div className="mt-1 font-medium">${tot===g?'✔ ยอดรวมบัญชีย่อยตรงกับบัญชีคุม':'✘ ยอดไม่ตรงกับบัญชีคุม'}</div>
+    <//></div>`}</div>`;
+}
+
+function TB({entries,sim,setSim}){
+  const {gl}=useMemo(()=>ledger(entries),[entries]);
+  const rows=Object.keys(gl).sort().map(a=>{const b=gl[a][gl[a].length-1].bal;return {a,dr:b>0?b:0,cr:b<0?-b:0};});
+  const sd=r2(rows.reduce((s,r)=>s+r.dr,0)+(sim?1000:0)),sc=r2(rows.reduce((s,r)=>s+r.cr,0));
+  const diff=r2(sd-sc),ok=diff===0;
+  return h`<div>
+    ${ok?h`<div className="rounded-xl bg-emerald-100 border-2 border-emerald-500 text-emerald-900 p-4 mb-3 font-bold text-lg">✔ สถานะปกติ: ยอดเดบิตเท่ากับยอดเครดิต (${f(sd)} บาท)</div>`
+        :h`<div className="rounded-xl bg-rose-100 border-4 border-rose-600 text-rose-900 p-4 mb-3"><div className="font-bold text-xl">⚠ แจ้งเตือน: ยอดเดบิตไม่เท่ากับยอดเครดิต!</div><div className="mt-1">ยอดเดบิต ${f(sd)} | ยอดเครดิต ${f(sc)} | ผลต่าง <b className="tn">${f(Math.abs(diff))}</b> บาท (${diff>0?'เดบิตมากกว่า':'เครดิตมากกว่า'}) — กรุณาตรวจสอบรายการบัญชี</div></div>`}
+    <div className="mb-3"><button className=${'px-4 py-2 rounded-lg font-semibold border-2 '+(sim?'bg-white border-slate-400 text-slate-700':'bg-amber-100 border-amber-500 text-amber-900')} onClick=${()=>setSim(!sim)}>${sim?'ยกเลิกการจำลอง (กลับสู่ยอดปกติ)':'ทดสอบ: จำลองยอดไม่สมดุล (เดบิตเกิน 1,000.00)'}</button></div>
+    <${Card} cls="overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm min-w-[520px]">
+      <thead className="bg-slate-800 text-white"><tr><th className="px-3 py-2 text-left">รหัส</th><th className="px-3 py-2 text-left">ชื่อบัญชี</th><th className="px-3 py-2 text-right">เดบิต</th><th className="px-3 py-2 text-right">เครดิต</th></tr></thead>
+      <tbody>${rows.map(r=>h`<tr key=${r.a} className="border-t border-slate-100"><td className="px-3 py-1.5">${r.a}</td><td className="px-3 py-1.5">${ACC[r.a]}</td><td className="px-3 py-1.5 text-right tn">${r.dr?f(r.dr):''}</td><td className="px-3 py-1.5 text-right tn">${r.cr?f(r.cr):''}</td></tr>`)}
+      ${sim&&h`<tr className="bg-rose-50 text-rose-800"><td className="px-3 py-1.5">-</td><td className="px-3 py-1.5">รายการจำลอง: ลงบัญชีด้านเดบิตข้างเดียว</td><td className="px-3 py-1.5 text-right tn">1,000.00</td><td className="px-3 py-1.5"></td></tr>`}</tbody>
+      <tfoot><tr className="border-t-2 border-slate-800 font-bold bg-slate-50"><td className="px-3 py-2" colSpan="2">รวม</td><td className="px-3 py-2 text-right tn">${f(sd)}</td><td className="px-3 py-2 text-right tn">${f(sc)}</td></tr></tfoot>
+    </table></div><//>
+    ${rows.length===0&&h`<div className="mt-3"><${Empty}/></div>`}
+  </div>`;
+}
+
+function Home({entries,onLoad,onClear,go}){
+  const sorted=[...entries].sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:0);
+  return h`<div>
+    <${Card} cls="p-6 text-center bg-gradient-to-br from-teal-50 to-white">
+      <div className="text-2xl md:text-3xl font-bold text-teal-800">กดปุ่มโหลดตัวอย่างเพื่อดูรายการค้า</div>
+      <p className="text-slate-600 mt-2">ข้อมูลตัวอย่าง 15 รายการ ครอบคลุมซื้อเชื่อ ขายเชื่อ รับเงิน จ่ายเงิน ส่งคืน รับคืน และรายการปรับปรุง</p>
+      <div className="mt-4 flex flex-wrap justify-center gap-3">
+        <button className=${btnP+' text-lg'} onClick=${onLoad}>${entries.length?'โหลดตัวอย่างใหม่ (15 รายการ)':'โหลดข้อมูลตัวอย่าง 15 รายการ'}</button>
+        ${entries.length>0&&h`<button className="px-5 py-2.5 rounded-lg border border-slate-300 bg-white" onClick=${onClear}>ล้างข้อมูลทั้งหมด</button>`}
+      </div>
+    <//>
+    ${entries.length>0&&h`<div>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-4">${Object.entries(BOOKS).map(([b,nm])=>h`<button key=${b} onClick=${()=>go(b)} className="bg-white border border-slate-200 rounded-xl p-3 text-left hover:border-teal-500"><div className="text-sm text-slate-600">${nm}</div><div className="text-2xl font-bold text-teal-700">${entries.filter(e=>e.book===b).length}<small className="text-sm text-slate-500"> รายการ</small></div></button>`)}</div>
+      <h3 className="font-bold text-lg mt-5 mb-2">รายการค้าทั้งหมด (ผ่านรายการแล้วอัตโนมัติ)</h3>
+      <${Card} cls="overflow-hidden"><div className="overflow-x-auto"><table className="w-full text-sm min-w-[640px]">
+        <thead className="bg-slate-50 text-slate-600"><tr><th className="px-3 py-2 text-left">วันที่</th><th className="px-3 py-2 text-left">สมุดรายวัน</th><th className="px-3 py-2 text-left">เลขที่</th><th className="px-3 py-2 text-left">รายการ</th><th className="px-3 py-2 text-right">จำนวนเงินรวม</th></tr></thead>
+        <tbody>${sorted.map(e=>h`<tr key=${e.doc} className="border-t border-slate-100"><td className="px-3 py-1.5 whitespace-nowrap">${dt(e.date)}</td><td className="px-3 py-1.5">${BOOKS[e.book]}</td><td className="px-3 py-1.5">${e.doc}</td><td className="px-3 py-1.5"><div>${e.type}</div><div className="text-xs text-slate-500">${e.desc}</div></td><td className="px-3 py-1.5 text-right tn">${f(e.tot)}</td></tr>`)}</tbody></table></div><//>
+    </div>`}
+  </div>`;
+}
+
+const NAV=[['หลัก',[['home','🏠 หน้าหลัก']]],
+['สมุดรายวัน',[['PJ','1) สมุดรายวันซื้อ'],['SJ','2) สมุดรายวันขาย'],['RJ','3) สมุดรายวันรับเงิน'],['CJ','4) สมุดรายวันจ่ายเงิน'],['GJ','5) สมุดรายวันทั่วไป']]],
+['บัญชีแยกประเภท',[['gl','บัญชีแยกประเภททั่วไป'],['ar','บัญชีย่อยลูกหนี้การค้า'],['ap','บัญชีย่อยเจ้าหนี้การค้า']]],
+['งบการเงิน',[['tb','งบทดลอง']]]];
+
+function App(){
+  const [entries,setEntries]=useState([]),[tab,setTab]=useState('home'),[sim,setSim]=useState(false);
+  const onAdd=l=>setEntries(p=>addTo(p,l));
+  const flat=NAV.flatMap(g=>g[1]),title=(flat.find(i=>i[0]===tab)||[])[1];
+  let page;
+  if(tab==='home')page=h`<${Home} entries=${entries} onLoad=${()=>{setEntries(addTo([],SAMPLES()));setSim(false);}} onClear=${()=>setEntries([])} go=${setTab}/>`;
+  else if(tab==='GJ')page=h`<${GJournal} key="GJ" entries=${entries} onAdd=${onAdd}/>`;
+  else if(BOOKS[tab])page=h`<${Journal} key=${tab} book=${tab} entries=${entries} onAdd=${onAdd}/>`;
+  else if(tab==='gl')page=h`<${GL} entries=${entries}/>`;
+  else if(tab==='ar'||tab==='ap')page=h`<${Sub} entries=${entries} kind=${tab}/>`;
+  else page=h`<${TB} entries=${entries} sim=${sim} setSim=${setSim}/>`;
+  return h`<div className="min-h-screen">
+    <header className="bg-teal-800 text-white px-4 py-3"><div className="font-bold text-lg">ร้านแอลปรายดอร์</div><div className="text-sm text-teal-100">ระบบบัญชีอัตโนมัติ ร้านค้าปลีก (ซื้อมาขายไป)</div></header>
+    <div className="md:flex">
+      <nav className="md:w-64 md:min-h-screen bg-white border-b md:border-r border-slate-200 p-2 md:p-3 flex md:block gap-1 overflow-x-auto">
+        ${NAV.map(([g,items])=>h`<div key=${g} className="flex md:block gap-1 md:mb-3"><div className="hidden md:block text-xs font-semibold text-slate-400 px-2 mb-1">${g}</div>
+          ${items.map(([k,nm])=>h`<button key=${k} onClick=${()=>setTab(k)} className=${'whitespace-nowrap md:w-full text-left px-3 py-2 rounded-lg text-sm '+(tab===k?'bg-teal-700 text-white font-semibold':'hover:bg-slate-100 text-slate-700')}>${nm}</button>`)}</div>`)}
+      </nav>
+      <main className="flex-1 p-3 md:p-6 max-w-5xl"><h2 className="text-xl font-bold mb-3">${title}</h2>${page}</main>
+    </div></div>`;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(h`<${App}/>`);
+</script>
+</body>
+</html>
